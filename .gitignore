@@ -1,0 +1,35 @@
+# Packaging / Executables
+build/
+dist/
+*.spec
+
+# Local Data & Databases (Large binary files)
+nse_project/data/*.db
+!nse_project/data/nse_all_stocks.db
+nse_project/data/*.bak*
+nse_project/data/*.corrupt
+nse_project/data/scrape_state.json
+NSE data/
+
+# Logs & Reports
+nse_project/logs/
+nse_project/reports/
+*.log
+
+# Environment & Testing
+.env
+.pytest_cache/
+__pycache__/
+
+# Legacy / Scratch scripts
+nse100_fa/
+*_data/
+archive/
+selium_test.py
+selium_test2.py
+test_script.py
+test_script_playwrite_v1.py
+scrape_financials.py
+
+# Docs
+docs/linkedin_post_draft.md

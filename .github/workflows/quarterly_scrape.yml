@@ -1,0 +1,49 @@
+name: NSE Fundamentals Quarterly Scraper
+
+on:
+  schedule:
+    # Run on the 1st of Jan, Apr, Jul, Oct at midnight UTC (quarterly)
+    - cron: '0 0 1 1,4,7,10 *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max for full NSE scrape
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd nse_project
+          pip install -r requirements.txt
+
+      - name: Run full NSE scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          cd nse_project
+          python -m pipeline.ingest full
+
+      - name: Upload SQLite backup as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nse-all-stocks-db-${{ github.run_number }}
+          path: nse_project/data/nse_all_stocks.db
+          retention-days: 90
+
+      - name: Commit updated SQLite DB to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add nse_project/data/nse_all_stocks.db
+          git diff --cached --quiet || git commit -m "chore: update fundamentals DB [$(date -u +%Y-%m-%d)]"
+          git push
