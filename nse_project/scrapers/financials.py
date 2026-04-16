@@ -170,9 +170,16 @@ def _parse_value(
 import random
 from urllib3.util import Retry
 from requests.adapters import HTTPAdapter
+import cloudscraper
 
 # Setup a global session with retries for anti-ban/resilience
-_SESSION = requests.Session()
+_SESSION = cloudscraper.create_scraper(
+    browser={
+        'browser': 'chrome',
+        'platform': 'windows',
+        'desktop': True
+    }
+)
 _RETRY_STRATEGY = Retry(
     total=3,
     backoff_factor=2, # exponential backoff: 2s, 4s, 8s...
