@@ -34,6 +34,7 @@ import time
 
 import requests
 from bs4 import BeautifulSoup
+from curl_cffi import requests as curl_requests
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -168,27 +169,10 @@ def _parse_value(
 # ---------------------------------------------------------------------------
 
 import random
-from urllib3.util import Retry
-from requests.adapters import HTTPAdapter
-import cloudscraper
 
-# Setup a global session with retries for anti-ban/resilience
-_SESSION = cloudscraper.create_scraper(
-    browser={
-        'browser': 'chrome',
-        'platform': 'windows',
-        'desktop': True
-    }
-)
-_RETRY_STRATEGY = Retry(
-    total=3,
-    backoff_factor=2, # exponential backoff: 2s, 4s, 8s...
-    status_forcelist=[429, 503, 504],
-    allowed_methods=["GET"]
-)
-_ADAPTER = HTTPAdapter(max_retries=_RETRY_STRATEGY)
-_SESSION.mount("https://", _ADAPTER)
-_SESSION.mount("http://", _ADAPTER)
+# Use curl_cffi session which impersonates Chrome's TLS fingerprint (JA3)
+# to bypass TLS-fingerprint-based bot detection on datacenter IPs.
+_SESSION = curl_requests.Session(impersonate="chrome")
 
 
 def _jitter_sleep(base_sec: float = _SLEEP_SEC):
@@ -229,7 +213,7 @@ def _fetch_page(symbol: str) -> BeautifulSoup | None:
             resp.raise_for_status()
             logger.info(f"  [{symbol}] Resolved via special case mapping to: {scrip_url}")
             return BeautifulSoup(resp.text, "lxml")
-        except Exception as exc:
+        except curl_requests.RequestsError as exc:
             logger.warning(f"[{symbol}] Special case mapping failed: {exc}")
 
     # Try 1: Direct URL with proper encoding of the symbol
@@ -242,16 +226,16 @@ def _fetch_page(symbol: str) -> BeautifulSoup | None:
         if response.url != url:
             logger.info(f"  [{symbol}] Redirected to: {response.url}")
         return BeautifulSoup(response.text, "lxml")
-    except requests.exceptions.HTTPError as exc:
-        status = exc.response.status_code
+    except curl_requests.RequestsError as exc:
+        status = getattr(getattr(exc, 'response', None), 'status_code', None)
         if status in (400, 404):
             logger.debug(f"[{symbol}] Direct URL failed with {status}, trying search fallback...")
-        else:
+        elif status == 403:
             logger.warning(f"[{symbol}] HTTP error {status}: {exc}")
             return None
-    except requests.exceptions.RequestException as exc:
-        logger.error(f"[{symbol}] Request failed: {exc}")
-        return None
+        else:
+            logger.error(f"[{symbol}] Request failed: {exc}")
+            return None
 
     # Try 2: Search Data Source for the symbol
     # #4: Refined search query for special characters
@@ -274,7 +258,7 @@ def _fetch_page(symbol: str) -> BeautifulSoup | None:
                     resp2.raise_for_status()
                     success_soup = BeautifulSoup(resp2.text, "lxml")
                     break
-        except Exception as exc:
+        except curl_requests.RequestsError as exc:
             logger.debug(f"[{symbol}] Search fallback for '{query}' failed: {exc}")
             
     if success_soup:
