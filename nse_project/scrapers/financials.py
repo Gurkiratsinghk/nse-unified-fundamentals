@@ -51,13 +51,10 @@ _BASE_URL  = "https://ticker.finology.in/company/"
 _SLEEP_SEC = 2
 _TIMEOUT   = 20
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
+# NOTE: Do NOT set User-Agent or Accept-Language here.
+# curl_cffi's impersonate="chrome" generates headers that match its TLS
+# fingerprint. Overriding them creates a detectable mismatch that triggers WAFs.
+_EXTRA_HEADERS = {
     "Referer": "https://ticker.finology.in/",
 }
 
@@ -209,7 +206,7 @@ def _fetch_page(symbol: str) -> BeautifulSoup | None:
     if symbol in _SPECIAL_CASES:
         scrip_url = f"{_BASE_URL}{_SPECIAL_CASES[symbol]}"
         try:
-            resp = _SESSION.get(scrip_url, headers=_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
+            resp = _SESSION.get(scrip_url, headers=_EXTRA_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
             resp.raise_for_status()
             logger.info(f"  [{symbol}] Resolved via special case mapping to: {scrip_url}")
             return BeautifulSoup(resp.text, "lxml")
@@ -220,7 +217,7 @@ def _fetch_page(symbol: str) -> BeautifulSoup | None:
     encoded_symbol = quote(symbol, safe="")
     url = f"{_BASE_URL}{encoded_symbol}"
     try:
-        response = _SESSION.get(url, headers=_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
+        response = _SESSION.get(url, headers=_EXTRA_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
         response.raise_for_status()
         # Log if Data Source redirected us (e.g. M&M → SCRIP-100520)
         if response.url != url:
@@ -245,7 +242,7 @@ def _fetch_page(symbol: str) -> BeautifulSoup | None:
     for query in [search_query, quote(symbol.replace("&", " "), safe="")]:
         search_url = f"https://ticker.finology.in/GetSearchData.ashx?q={query}"
         try:
-            search_resp = _SESSION.get(search_url, headers=_HEADERS, timeout=_TIMEOUT)
+            search_resp = _SESSION.get(search_url, headers=_EXTRA_HEADERS, timeout=_TIMEOUT)
             search_resp.raise_for_status()
             results = search_resp.json()
             if results and isinstance(results, list) and len(results) > 0:
@@ -254,7 +251,7 @@ def _fetch_page(symbol: str) -> BeautifulSoup | None:
                 if fincode:
                     resolved_url = f"{_BASE_URL}SCRIP-{fincode}"
                     logger.info(f"  [{symbol}] Search ({query}) resolved via FINCODE to: {resolved_url}")
-                    resp2 = _SESSION.get(resolved_url, headers=_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
+                    resp2 = _SESSION.get(resolved_url, headers=_EXTRA_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
                     resp2.raise_for_status()
                     success_soup = BeautifulSoup(resp2.text, "lxml")
                     break
