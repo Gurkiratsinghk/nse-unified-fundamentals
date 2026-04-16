@@ -16,7 +16,7 @@ def test_impersonate(impersonate):
 def test_tls_client(identifier):
     try:
         s = tls_client.Session(client_identifier=identifier, random_tls_extension_order=True)
-        r = s.get(url, headers=headers, timeout=15)
+        r = s.get(url, headers=headers, timeout_seconds=15)
         print(f"tls_client ({identifier}): Status {r.status_code}")
     except Exception as e:
         print(f"tls_client ({identifier}): Error {e}")
