@@ -1,8 +1,8 @@
 # NSE Unified Fundamentals
 
-An automated CLI tool and ingestion pipeline for scraping, archiving, and analyzing fundamental financial data for all NSE-listed (National Stock Exchange of India) stocks.
+A CLI and API tool for accessing, scraping, archiving, and analyzing fundamental financial data for all NSE-listed (National Stock Exchange of India) stocks.
 
-> **Disclaimer:** This project is meant to aggregate publicly available financial data into a structured database format. We do not manufacture or re-brand this data as our own. The tool simply acts as an API and database builder.
+> **Disclaimer:** Currently this project only supports past five years of data.
 
 ## Key Features
 
@@ -20,8 +20,12 @@ If you don't want to run the full scraper pipeline and just want to access the d
 
 ### 1. Credentials
 To read the data, you will need the following (contact me or check the project settings if you are a collaborator):
-- **Project URL:** https://hgakynqiwrzlrtdiepwz.supabase.co
-- **Anon Public Key:** sb_publishable_GTnOe8ef-eh4eD8DqFk3pA_-NEd34gl
+
+```python
+# Supabase Configuration
+SUPABASE_URL=https://hgakynqiwrzlrtdiepwz.supabase.co
+SUPABASE_KEY=sb_publishable_GTnOe8ef-eh4eD8DqFk3pA_-NEd34gl 
+```
 
 ### 2. Integration Example (Python)
 You can pull live data into your own analysis scripts using the `supabase-py` library:
@@ -100,6 +104,7 @@ For a deeper dive into how this system works, to avoid the "black box" problem, 
 - **`docs/architecture.md`** - How the pipelines, scrapers, and storage interact.
 - **`docs/database.md`** - Understanding the EAV schema.
 - **`docs/supabase_security_guide.md`** - Securing your public deployments.
+- **`docs/api_query_guide.md`** - How to query the database.   
 
 ## Future Plans (Fundamental Analysis)
 
@@ -113,4 +118,5 @@ With this structured database in place, upcoming features focus on **Fundamental
 Contributions are welcome! Feel free to reach me out on:
 
 LinkedIn: https://www.linkedin.com/in/gurkiratsinghkohli/
+
 Instagram: gurkirat_skohl (if unable to connect on LinkedIn)
