@@ -17,6 +17,6 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install curl_cffi tls_client
+        run: pip install curl_cffi tls_client typing_extensions
       - name: Run bypass test
         run: python test_bypass.py
