@@ -31,6 +31,7 @@ Table index mapping (0-based, confirmed from unit.py page inspection):
 
 import re
 import time
+import sys
 
 import requests
 from bs4 import BeautifulSoup
@@ -790,6 +791,66 @@ def save_company_fundamentals(symbol: str, session: Session) -> bool:
     )
     return True
 
+def _init_cloudflare_bypass() -> bool:
+    """
+    Uses SeleniumBase (with Xvfb on Linux) to solve the Cloudflare Turnstile
+    challenge, extracts the cf_clearance cookie, and injects it into curl_cffi.
+    """
+    global _SESSION, _EXTRA_HEADERS
+    logger.info("Initializing Cloudflare Bypass via SeleniumBase...")
+    url_solve = f"{_BASE_URL}TCS"
+
+    try:
+        from seleniumbase import SB
+        
+        display = None
+        if sys.platform.startswith('linux'):
+            from pyvirtualdisplay import Display
+            display = Display(visible=0, size=(1280, 720))
+            display.start()
+
+        cf_clearance = None
+        user_agent = None
+
+        with SB(uc=True, headless=False) as sb:
+            sb.uc_open_with_reconnect(url_solve, 4)
+            time.sleep(5)
+            
+            title = sb.get_title()
+            if "Just a moment" in title or "Cloudflare" in title:
+                logger.info("Cloudflare challenge encountered, waiting for auto-solve...")
+                time.sleep(6)
+                try:
+                    sb.uc_gui_click_captcha()
+                except Exception:
+                    pass
+                time.sleep(4)
+                title = sb.get_title()
+            
+            # Extract cookies and UA
+            for c in sb.get_cookies():
+                if c['name'] == 'cf_clearance':
+                    cf_clearance = c['value']
+                    break
+            user_agent = sb.execute_script("return navigator.userAgent;")
+
+        if display:
+            display.stop()
+
+        if not cf_clearance:
+            logger.error(f"Failed to get cf_clearance cookie. Final title: {title}")
+            return False
+
+        logger.success(f"Successfully obtained cf_clearance cookie.")
+        
+        # Inject into curl_cffi session
+        _EXTRA_HEADERS["User-Agent"] = user_agent
+        _SESSION.cookies.set("cf_clearance", cf_clearance, domain=".finology.in")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to initialize SeleniumBase bypass: {e}")
+        return False
 
 def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int]:
     """
@@ -804,6 +865,28 @@ def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int
     """
     success = 0
     failure = 0
+
+    if not symbols:
+        return 0, 0
+
+    # 1. Initialize Bypass (extract cookie using SeleniumBase)
+    if not _init_cloudflare_bypass():
+        logger.critical("Cloudflare bypass initialization failed. Aborting scrape to preserve data.")
+        return 0, len(symbols)
+
+    # 2. Connection Test (make sure curl_cffi actually works with the cookie)
+    logger.info("Testing connection bypass on generic page (TCS)...")
+    try:
+        test_resp = _SESSION.get(f"{_BASE_URL}TCS", headers=_EXTRA_HEADERS, timeout=_TIMEOUT)
+        test_resp.raise_for_status()
+        test_soup = BeautifulSoup(test_resp.text, "lxml")
+        if not test_soup.find("div", id="companyessentials"):
+            raise ValueError("Test scrape returned 200 but failed to find 'companyessentials'. Possible WAF silent block.")
+        logger.success("Connection test passed! Proceeding with full scrape.")
+    except Exception as e:
+        logger.critical(f"Connection test failed! The bypass is not working properly. Error: {e}")
+        logger.critical("Aborting full scrape to preserve database integrity.")
+        return 0, len(symbols)
 
     for idx, symbol in enumerate(symbols, start=1):
         logger.info(f"--- [{idx}/{len(symbols)}] {symbol} ---")
