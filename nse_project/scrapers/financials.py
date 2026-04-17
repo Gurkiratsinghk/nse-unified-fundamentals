@@ -32,6 +32,7 @@ Table index mapping (0-based, confirmed from unit.py page inspection):
 import re
 import time
 import sys
+import os
 
 import requests
 from bs4 import BeautifulSoup
