@@ -802,27 +802,26 @@ def _init_cloudflare_bypass() -> bool:
 
     try:
         from seleniumbase import SB
-        
-        display = None
-        if sys.platform.startswith('linux'):
-            from pyvirtualdisplay import Display
-            display = Display(visible=0, size=(1280, 720))
-            display.start()
+
+        # On Linux CI runners, use SeleniumBase's built-in xvfb support.
+        # This correctly initialises the virtual framebuffer before pyautogui
+        # is imported, avoiding the "not enough values to unpack" Xlib error.
+        on_linux = sys.platform.startswith('linux')
 
         cf_clearance = None
         user_agent = None
 
-        with SB(uc=True, headless=False) as sb:
+        with SB(uc=True, headless=False, xvfb=on_linux) as sb:
             sb.uc_open_with_reconnect(url_solve, 4)
             time.sleep(5)
-            
+
             title = sb.get_title()
             if "Just a moment" in title or "Cloudflare" in title:
                 logger.info("Cloudflare challenge encountered, waiting for auto-solve...")
-                # Usually Turnstile auto-solves in UC mode. Don't use PyAutoGUI on headless Xvfb.
+                # Turnstile auto-solves in UC mode — just wait.
                 time.sleep(10)
                 title = sb.get_title()
-            
+
             # Extract cookies and UA
             for c in sb.get_cookies():
                 if c['name'] == 'cf_clearance':
@@ -830,18 +829,12 @@ def _init_cloudflare_bypass() -> bool:
                     break
             user_agent = sb.execute_script("return navigator.userAgent;")
 
-        if display:
-            try:
-                display.stop()
-            except Exception as e:
-                logger.warning(f"Ignored error while stopping virtual display: {e}")
-
         if not cf_clearance:
             logger.error(f"Failed to get cf_clearance cookie. Final title: {title}")
             return False
 
-        logger.success(f"Successfully obtained cf_clearance cookie.")
-        
+        logger.success("Successfully obtained cf_clearance cookie.")
+
         # Inject into curl_cffi session
         _EXTRA_HEADERS["User-Agent"] = user_agent
         _SESSION.cookies.set("cf_clearance", cf_clearance, domain=".finology.in")
