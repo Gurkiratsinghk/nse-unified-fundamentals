@@ -8,7 +8,11 @@ on:
 
 jobs:
   test_bypass:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -16,9 +20,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install system dependencies
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: Install dependencies
-        run: pip install pyvirtualdisplay seleniumbase
+        run: pip install pyvirtualdisplay seleniumbase curl_cffi
       - name: Run bypass test
+        env:
+          CF_CLEARANCE: ${{ secrets.CF_CLEARANCE }}
         run: python test_bypass.py
