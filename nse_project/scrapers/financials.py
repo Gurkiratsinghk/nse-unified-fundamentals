@@ -50,13 +50,15 @@ from data.supabase_sync import sync_company_to_supabase
 # ---------------------------------------------------------------------------
 
 _BASE_URL  = "https://ticker.finology.in/company/"
-_SLEEP_SEC = 2
+_SLEEP_SEC = 2          # Base inter-request delay (seconds); jitter is applied on top
 _TIMEOUT   = 20
+_COOKIE_REFRESH_INTERVAL = 60  # Re-solve Cloudflare challenge every N requests
 
-# NOTE: Do NOT set User-Agent or Accept-Language here.
-# curl_cffi's impersonate="chrome" generates headers that match its TLS
-# fingerprint. Overriding them creates a detectable mismatch that triggers WAFs.
-_EXTRA_HEADERS = {
+# NOTE: Do NOT pre-populate User-Agent or Accept-Language here.
+# _init_cloudflare_bypass() extracts them from a real Chrome session and
+# populates this dict at startup. Overriding with static values would create
+# a detectable fingerprint mismatch against the TLS JA3 signature.
+_EXTRA_HEADERS: dict = {
     "Referer": "https://ticker.finology.in/",
 }
 
@@ -175,9 +177,19 @@ _SESSION = curl_requests.Session(impersonate="chrome")
 
 
 def _jitter_sleep(base_sec: float = _SLEEP_SEC):
-    """Sleep with random jitter to avoid bot detection."""
-    jitter = random.uniform(0.5, 1.5)
-    time.sleep(base_sec * jitter)
+    """Sleep with randomized jitter to mimic human inter-page navigation delays.
+
+    - Base delay: uniformly scaled by 0.75x–2x.
+    - Occasional long pause: ~10% of calls sleep an extra 5–12 seconds to
+      simulate a human pausing to read a page, which resets any sliding-window
+      rate-limit counters on the WAF.
+    """
+    jitter = random.uniform(0.75, 2.0)
+    sleep_time = base_sec * jitter
+    # Inject a rare "human reading" pause
+    if random.random() < 0.10:
+        sleep_time += random.uniform(5.0, 12.0)
+    time.sleep(sleep_time)
 
 
 # #4: Hardcoded mapping for problematic symbols as a last-resort safeguard
@@ -794,77 +806,98 @@ def save_company_fundamentals(symbol: str, session: Session) -> bool:
 
 def _init_cloudflare_bypass() -> bool:
     """
-    Uses SeleniumBase (with Xvfb on Linux) to solve the Cloudflare Turnstile
-    challenge, extracts the cf_clearance cookie, and injects it into curl_cffi.
+    Solves the Cloudflare Turnstile challenge using SeleniumBase (UC mode)
+    inside a virtual framebuffer, then extracts the cf_clearance cookie and
+    the full browser header set, injecting both into the shared curl_cffi
+    session for subsequent high-speed requests.
+
+    Call this once at startup and again every _COOKIE_REFRESH_INTERVAL requests.
+    Returns True on success, False on any failure.
     """
     global _SESSION, _EXTRA_HEADERS
-    logger.info("Initializing Cloudflare Bypass via SeleniumBase...")
+    logger.info("Initializing Cloudflare bypass via SeleniumBase UC mode...")
     url_solve = f"{_BASE_URL}TCS"
 
     try:
         from seleniumbase import SB
         from pyvirtualdisplay import Display
 
-        # 1. Start virtual display manually.
-        # This ensures os.environ['DISPLAY'] is set BEFORE pyautogui/Xlib is touched.
+        # Start virtual display BEFORE importing any GUI library (pyautogui, Xlib)
+        # so that os.environ['DISPLAY'] is set and Xlib can connect to Xvfb.
         display = Display(visible=0, size=(1280, 720))
         display.start()
-        logger.info(f"Manual virtual display started: {os.environ.get('DISPLAY')}")
+        logger.info(f"Virtual display started on: {os.environ.get('DISPLAY', 'N/A')}")
 
         cf_clearance = None
         user_agent = None
+        browser_headers: dict = {}
 
-        # 2. Launch SeleniumBase (headed but inside Xvfb)
         with SB(uc=True, headless=False) as sb:
             sb.uc_open_with_reconnect(url_solve, 4)
             time.sleep(5)
 
             title = sb.get_title()
             if "Just a moment" in title or "Cloudflare" in title:
-                logger.info("Cloudflare challenge encountered, attempting GUI auto-solve...")
-                # Mandatory sleep before clicking
+                logger.info("Cloudflare challenge detected — attempting GUI click to solve Turnstile...")
                 time.sleep(7)
                 try:
-                    # Solving Turnstile on Datacenter IPs usually requires a mouse interaction.
                     sb.uc_gui_click_captcha()
-                    logger.info("GUI click attempted. Waiting for handshake...")
-                except Exception as e:
-                    logger.warning(f"GUI click failed or was skipped: {e}")
-                
+                    logger.info("GUI click sent. Waiting for handshake to complete...")
+                except Exception as click_err:
+                    logger.warning(f"GUI click skipped or failed: {click_err}")
                 time.sleep(10)
                 title = sb.get_title()
 
-            # 3. Extract cookies and UA
-            for c in sb.get_cookies():
-                if c['name'] == 'cf_clearance':
-                    cf_clearance = c['value']
+            # Extract cf_clearance cookie
+            for cookie in sb.get_cookies():
+                if cookie['name'] == 'cf_clearance':
+                    cf_clearance = cookie['value']
                     break
+
+            # Extract ALL browser headers so curl_cffi perfectly mirrors Chrome.
+            # This includes User-Agent, Accept-Language, sec-ch-ua, etc.
             user_agent = sb.execute_script("return navigator.userAgent;")
+            accept_language = sb.execute_script(
+                "return navigator.language || navigator.userLanguage || 'en-US,en;q=0.9';"
+            )
+            # sec-ch-ua headers are derived from UA; use the real values from browser
+            sec_ch_ua = sb.execute_script(
+                "return navigator?.userAgentData?.brands"
+                "  ? navigator.userAgentData.brands.map(b => `\"${b.brand}\";v=\"${b.version}\"`).join(', ')"
+                "  : '\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\"';"
+            )
+            browser_headers = {
+                "User-Agent": user_agent,
+                "Accept-Language": accept_language,
+                "sec-ch-ua": sec_ch_ua,
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Linux"' if sys.platform.startswith('linux') else '"Windows"',
+            }
 
         try:
             display.stop()
-        except:
+        except Exception:
             pass
 
         if not cf_clearance:
-            logger.error(f"Failed to get cf_clearance cookie. Final title: {title}")
+            logger.error(f"cf_clearance cookie not found after bypass attempt. Final title: {title}")
             return False
 
-        logger.success("Successfully obtained cf_clearance cookie.")
+        logger.success("cf_clearance cookie obtained. Synchronizing headers with curl_cffi session...")
 
-        # 4. Inject into curl_cffi session
-        _EXTRA_HEADERS["User-Agent"] = user_agent
+        # Merge browser headers into _EXTRA_HEADERS (preserves Referer key)
+        _EXTRA_HEADERS.update(browser_headers)
         _SESSION.cookies.set("cf_clearance", cf_clearance, domain=".finology.in")
         return True
 
     except Exception:
-        logger.exception("Failed to initialize SeleniumBase bypass")
+        logger.exception("Failed to initialize Cloudflare bypass")
         return False
 
 def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int]:
     """
     Loop through a list of symbols, scraping and saving each.
-    
+
     Optional 'callback' is called after each symbol with (symbol, is_success).
 
     Accepts any list — both active and previously removed companies —
@@ -878,26 +911,43 @@ def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int
     if not symbols:
         return 0, 0
 
-    # 1. Initialize Bypass (extract cookie using SeleniumBase)
+    # 1. Solve Cloudflare challenge and inject cookie into curl_cffi session.
     if not _init_cloudflare_bypass():
         logger.critical("Cloudflare bypass initialization failed. Aborting scrape to preserve data.")
         return 0, len(symbols)
 
-    # 2. Connection Test (make sure curl_cffi actually works with the cookie)
-    logger.info("Testing connection bypass on generic page (TCS)...")
+    # 2. Connection test: verify curl_cffi actually works with the obtained cookie.
+    logger.info("Testing bypass connection on TCS...")
     try:
         test_resp = _SESSION.get(f"{_BASE_URL}TCS", headers=_EXTRA_HEADERS, timeout=_TIMEOUT)
         test_resp.raise_for_status()
         test_soup = BeautifulSoup(test_resp.text, "lxml")
         if not test_soup.find("div", id="companyessentials"):
-            raise ValueError("Test scrape returned 200 but failed to find 'companyessentials'. Possible WAF silent block.")
-        logger.success("Connection test passed! Proceeding with full scrape.")
+            raise ValueError("Page returned 200 but 'companyessentials' div missing — possible WAF silent block.")
+        logger.success("Connection test passed. Starting full scrape.")
     except Exception as e:
-        logger.critical(f"Connection test failed! The bypass is not working properly. Error: {e}")
-        logger.critical("Aborting full scrape to preserve database integrity.")
+        logger.critical(f"Connection test failed: {e}")
+        logger.critical("Aborting scrape to preserve database integrity.")
         return 0, len(symbols)
 
+    from urllib.parse import quote
+    prev_url = f"{_BASE_URL}TCS"  # Seed referer with the connection-test page
+
     for idx, symbol in enumerate(symbols, start=1):
+        # 3. Periodic cookie refresh every _COOKIE_REFRESH_INTERVAL requests.
+        # cf_clearance has a hidden TTL; refreshing proactively prevents mid-run 403s.
+        if idx > 1 and (idx - 1) % _COOKIE_REFRESH_INTERVAL == 0:
+            logger.info(f"[{idx}/{len(symbols)}] Cookie refresh interval reached. Re-solving challenge...")
+            if not _init_cloudflare_bypass():
+                logger.critical("Cookie refresh failed. Stopping scrape early to preserve data.")
+                failure += len(symbols) - idx + 1
+                break
+            logger.success(f"Cookie refreshed. Resuming from [{idx}/{len(symbols)}].")
+
+        # 4. Update Referer to the previous page URL for natural navigation flow.
+        _EXTRA_HEADERS["Referer"] = prev_url
+        prev_url = f"{_BASE_URL}{quote(symbol, safe='')}"
+
         logger.info(f"--- [{idx}/{len(symbols)}] {symbol} ---")
         try:
             with get_db() as session:
@@ -906,7 +956,7 @@ def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int
                 success += 1
             else:
                 failure += 1
-            
+
             if callback:
                 callback(symbol, ok)
         except Exception as exc:
@@ -916,4 +966,4 @@ def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int
         if idx < len(symbols):
             _jitter_sleep(_SLEEP_SEC)
 
-    return success, failure
+    return success, failure
