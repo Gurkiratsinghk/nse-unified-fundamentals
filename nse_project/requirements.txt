@@ -13,4 +13,6 @@ prompt_toolkit>=3.0.43
 curl_cffi>=0.7.0
 pyarrow>=15.0.0
 seleniumbase>=4.25.0
-pyautogui
+pyvirtualdisplay>=3.0
+pyautogui>=0.9.54
+python3-Xlib>=0.15

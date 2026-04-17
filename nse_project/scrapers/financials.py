@@ -802,32 +802,48 @@ def _init_cloudflare_bypass() -> bool:
 
     try:
         from seleniumbase import SB
+        from pyvirtualdisplay import Display
 
-        # On Linux CI runners, use SeleniumBase's built-in xvfb support.
-        # This correctly initialises the virtual framebuffer before pyautogui
-        # is imported, avoiding the "not enough values to unpack" Xlib error.
-        on_linux = sys.platform.startswith('linux')
+        # 1. Start virtual display manually.
+        # This ensures os.environ['DISPLAY'] is set BEFORE pyautogui/Xlib is touched.
+        display = Display(visible=0, size=(1280, 720))
+        display.start()
+        logger.info(f"Manual virtual display started: {os.environ.get('DISPLAY')}")
 
         cf_clearance = None
         user_agent = None
 
-        with SB(uc=True, headless=False, xvfb=on_linux) as sb:
+        # 2. Launch SeleniumBase (headed but inside Xvfb)
+        with SB(uc=True, headless=False) as sb:
             sb.uc_open_with_reconnect(url_solve, 4)
             time.sleep(5)
 
             title = sb.get_title()
             if "Just a moment" in title or "Cloudflare" in title:
-                logger.info("Cloudflare challenge encountered, waiting for auto-solve...")
-                # Turnstile auto-solves in UC mode — just wait.
+                logger.info("Cloudflare challenge encountered, attempting GUI auto-solve...")
+                # Mandatory sleep before clicking
+                time.sleep(7)
+                try:
+                    # Solving Turnstile on Datacenter IPs usually requires a mouse interaction.
+                    sb.uc_gui_click_captcha()
+                    logger.info("GUI click attempted. Waiting for handshake...")
+                except Exception as e:
+                    logger.warning(f"GUI click failed or was skipped: {e}")
+                
                 time.sleep(10)
                 title = sb.get_title()
 
-            # Extract cookies and UA
+            # 3. Extract cookies and UA
             for c in sb.get_cookies():
                 if c['name'] == 'cf_clearance':
                     cf_clearance = c['value']
                     break
             user_agent = sb.execute_script("return navigator.userAgent;")
+
+        try:
+            display.stop()
+        except:
+            pass
 
         if not cf_clearance:
             logger.error(f"Failed to get cf_clearance cookie. Final title: {title}")
@@ -835,7 +851,7 @@ def _init_cloudflare_bypass() -> bool:
 
         logger.success("Successfully obtained cf_clearance cookie.")
 
-        # Inject into curl_cffi session
+        # 4. Inject into curl_cffi session
         _EXTRA_HEADERS["User-Agent"] = user_agent
         _SESSION.cookies.set("cf_clearance", cf_clearance, domain=".finology.in")
         return True
