@@ -819,12 +819,8 @@ def _init_cloudflare_bypass() -> bool:
             title = sb.get_title()
             if "Just a moment" in title or "Cloudflare" in title:
                 logger.info("Cloudflare challenge encountered, waiting for auto-solve...")
-                time.sleep(6)
-                try:
-                    sb.uc_gui_click_captcha()
-                except Exception:
-                    pass
-                time.sleep(4)
+                # Usually Turnstile auto-solves in UC mode. Don't use PyAutoGUI on headless Xvfb.
+                time.sleep(10)
                 title = sb.get_title()
             
             # Extract cookies and UA
@@ -835,7 +831,10 @@ def _init_cloudflare_bypass() -> bool:
             user_agent = sb.execute_script("return navigator.userAgent;")
 
         if display:
-            display.stop()
+            try:
+                display.stop()
+            except Exception as e:
+                logger.warning(f"Ignored error while stopping virtual display: {e}")
 
         if not cf_clearance:
             logger.error(f"Failed to get cf_clearance cookie. Final title: {title}")
@@ -848,8 +847,8 @@ def _init_cloudflare_bypass() -> bool:
         _SESSION.cookies.set("cf_clearance", cf_clearance, domain=".finology.in")
         return True
 
-    except Exception as e:
-        logger.error(f"Failed to initialize SeleniumBase bypass: {e}")
+    except Exception:
+        logger.exception("Failed to initialize SeleniumBase bypass")
         return False
 
 def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int]:
