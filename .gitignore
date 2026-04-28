@@ -33,3 +33,5 @@ scrape_financials.py
 
 # Docs
 docs/linkedin_post_draft.md
+PROJECT_LOGBOOK.md
+.agents/*
