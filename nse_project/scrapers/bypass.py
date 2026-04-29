@@ -43,88 +43,98 @@ class CloudflareBlockError(Exception):
     """Raised when Cloudflare returns a 403 Forbidden, indicating a block."""
     pass
 
-def init_cloudflare_bypass() -> bool:
+# User-Agent profiles for rotation
+_UA_PROFILES = [
+    {"platform": "Linux", "ua_hint": "Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\""},
+    {"platform": "Windows", "ua_hint": "Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\""},
+    {"platform": "macOS", "ua_hint": "Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\""},
+]
+
+def init_cloudflare_bypass(max_retries: int = 3) -> bool:
     """
-    Solves the Cloudflare Turnstile challenge using SeleniumBase (UC mode)
-    inside a virtual framebuffer, then extracts the cf_clearance cookie and
-    the full browser header set, injecting both into the shared curl_cffi
-    session for subsequent high-speed requests.
+    Solves the Cloudflare Turnstile challenge using SeleniumBase (UC mode).
+    Includes robust retry logic with wait intervals and UA rotation.
     """
     global _SESSION, _EXTRA_HEADERS
-    logger.info("Initializing Cloudflare bypass via SeleniumBase UC mode...")
     url_solve = f"{_BASE_URL}TCS"
 
-    try:
-        # Lazy load heavy dependencies
-        from seleniumbase import SB
-        from pyvirtualdisplay import Display
-
-        display = Display(visible=0, size=(1280, 720))
-        display.start()
-        logger.info(f"Virtual display started on: {os.environ.get('DISPLAY', 'N/A')}")
-
-        cf_clearance = None
-        user_agent = None
-        browser_headers: dict = {}
-
-        with SB(uc=True, headless=False) as sb:
-            sb.uc_open_with_reconnect(url_solve, 4)
-            time.sleep(5)
-
-            title = sb.get_title()
-            if "Just a moment" in title or "Cloudflare" in title:
-                logger.info("Cloudflare challenge detected — attempting GUI click to solve Turnstile...")
-                time.sleep(7)
-                try:
-                    sb.uc_gui_click_captcha()
-                    logger.info("GUI click sent. Waiting for handshake to complete...")
-                except Exception as click_err:
-                    logger.warning(f"GUI click skipped or failed: {click_err}")
-                time.sleep(10)
-                title = sb.get_title()
-
-            for cookie in sb.get_cookies():
-                if cookie['name'] == 'cf_clearance':
-                    cf_clearance = cookie['value']
-                    break
-
-            user_agent = sb.execute_script("return navigator.userAgent;")
-            accept_language = sb.execute_script(
-                "return navigator.language || navigator.userLanguage || 'en-US,en;q=0.9';"
-            )
-            sec_ch_ua = sb.execute_script(
-                "return navigator?.userAgentData?.brands"
-                "  ? navigator.userAgentData.brands.map(b => `\"${b.brand}\";v=\"${b.version}\"`).join(', ')"
-                "  : '\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\"';"
-            )
-            browser_headers = {
-                "User-Agent": user_agent,
-                "Accept-Language": accept_language,
-                "sec-ch-ua": sec_ch_ua,
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"Linux"' if sys.platform.startswith('linux') else '"Windows"',
-            }
-
-        try:
-            display.stop()
-        except Exception:
-            pass
-
-        if not cf_clearance:
-            logger.error(f"cf_clearance cookie not found after bypass attempt. Final title: {title}")
-            return False
-
-        logger.success("cf_clearance cookie obtained. Synchronizing headers with curl_cffi session...")
+    for attempt in range(1, max_retries + 1):
+        logger.info(f"Cloudflare bypass attempt {attempt}/{max_retries}...")
         
-        # Reset session to clear old cookies/state on refresh
-        _SESSION = curl_requests.Session(impersonate="chrome")
-        _EXTRA_HEADERS.update(browser_headers)
-        _SESSION.cookies.set("cf_clearance", cf_clearance, domain=".finology.in")
-        return True
+        try:
+            from seleniumbase import SB
+            from pyvirtualdisplay import Display
 
-    except Exception as e:
-        logger.exception(f"Failed to initialize Cloudflare bypass: {e}")
-        return False
+            display = Display(visible=0, size=(1280, 720))
+            display.start()
+
+            cf_clearance = None
+            user_agent = None
+            browser_headers: dict = {}
+            
+            # Rotate UA profile on retry
+            ua_profile = _UA_PROFILES[(attempt - 1) % len(_UA_PROFILES)]
+
+            with SB(uc=True, headless=False) as sb:
+                # Force a specific platform via JS override if possible, or just let SB handle it
+                sb.uc_open_with_reconnect(url_solve, 4)
+                time.sleep(5)
+
+                title = sb.get_title()
+                if "Just a moment" in title or "Cloudflare" in title:
+                    logger.info("Challenge detected — attempting GUI solve...")
+                    time.sleep(7)
+                    try:
+                        sb.uc_gui_click_captcha()
+                    except Exception:
+                        pass
+                    time.sleep(12)
+                    title = sb.get_title()
+
+                for cookie in sb.get_cookies():
+                    if cookie['name'] == 'cf_clearance':
+                        cf_clearance = cookie['value']
+                        break
+
+                user_agent = sb.execute_script("return navigator.userAgent;")
+                accept_language = sb.execute_script("return navigator.language || 'en-US,en;q=0.9';")
+                
+                browser_headers = {
+                    "User-Agent": user_agent,
+                    "Accept-Language": accept_language,
+                    "sec-ch-ua": ua_profile["ua_hint"],
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": f"\"{ua_profile['platform']}\"",
+                }
+
+            display.stop()
+
+            if cf_clearance:
+                logger.success(f"Bypass successful on attempt {attempt}.")
+                _SESSION = curl_requests.Session(impersonate="chrome")
+                _EXTRA_HEADERS.update(browser_headers)
+                _SESSION.cookies.set("cf_clearance", cf_clearance, domain=".finology.in")
+                return True
+            
+            logger.warning(f"Attempt {attempt} failed. Final title: {title}")
+
+        except Exception as e:
+            logger.error(f"Error during bypass attempt {attempt}: {e}")
+            try:
+                display.stop()
+            except:
+                pass
+
+        if attempt < max_retries:
+            wait_sec = 120
+            logger.info(f"Retrying in {wait_sec} seconds...")
+            for i in range(wait_sec, 0, -10):
+                if i % 30 == 0 or i <= 10:
+                    logger.info(f"Cooldown: {i}s remaining...")
+                time.sleep(10)
+
+    logger.critical("All Cloudflare bypass attempts failed.")
+    return False
 
 def jitter_sleep(base_sec: float = _SLEEP_SEC):
     """Sleep with randomized jitter to mimic human inter-page navigation delays."""

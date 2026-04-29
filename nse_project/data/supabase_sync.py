@@ -79,6 +79,7 @@ def sync_company_to_supabase(session: Session, symbol: str) -> bool:
     if not company:
         return False
 
+    chunk_size = 500
     try:
         # 1. Upsert Company record
         _execute_with_retry(
@@ -127,7 +128,6 @@ def sync_company_to_supabase(session: Session, symbol: str) -> bool:
                 "value_num": y.value_num,
                 "value_text": y.value_text
             } for y in unsynced_yr]
-            chunk_size = 500
             for i in range(0, len(yr_payload), chunk_size):
                 _execute_with_retry(
                     supabase.table("yearly_financials").upsert(

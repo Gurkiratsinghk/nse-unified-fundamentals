@@ -9,6 +9,8 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 360  # 6 hours max for full NSE scrape
 
     steps:
