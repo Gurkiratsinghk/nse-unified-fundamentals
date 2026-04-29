@@ -150,12 +150,12 @@ def build_layout(body_content) -> Layout:
 # ---------------------------------------------------------------------------
 
 def do_search() -> tuple:
-    query = Prompt.ask("[bold cyan]Enter company name or symbol[/]")
-    if not query.strip():
-        return Text("No query provided.", style="yellow"), None
+    query = Prompt.ask("[bold cyan]Enter search query (or 'X' to cancel)[/]").strip()
+    if query.upper() == "X" or not query:
+        return Text("Search cancelled.", style="yellow"), None
 
     results = []
-    sb_data = _fetch_supabase("companies", or_=f"symbol.ilike.%{query}%,company_name.ilike.%{query}%", limit=20)
+    sb_data = _fetch_supabase("companies", or_=f"symbol.ilike.%{query}%,company_name.ilike.%{query}%")
     if sb_data is not None:
         results = sb_data
     else:
@@ -163,7 +163,6 @@ def do_search() -> tuple:
             db_res = (
                 session.query(Company)
                 .filter((Company.symbol.ilike(f"%{query}%")) | (Company.company_name.ilike(f"%{query}%")))
-                .limit(20)
                 .all()
             )
             results = [{"symbol": c.symbol, "company_name": c.company_name, "sector": c.sector, "isin": c.isin} for c in db_res]
@@ -171,16 +170,37 @@ def do_search() -> tuple:
     if not results:
         return Text(f"No companies found matching '{query}'.", style="yellow"), None
 
-    table = Table(box=box.SQUARE, show_lines=True, border_style="white")
-    table.add_column("SYMBOL", style="bold cyan", min_width=10)
-    table.add_column("COMPANY NAME", style="white", min_width=30)
-    table.add_column("SECTOR", style="white")
-    table.add_column("ISIN", style="white")
+    page_size = 15
+    offset = 0
+    total = len(results)
 
-    for c in results:
-        table.add_row(c.get("symbol"), c.get("company_name") or "", c.get("sector") or "", c.get("isin") or "")
+    while True:
+        chunk = results[offset : offset + page_size]
+        table = Table(box=box.SQUARE, show_lines=True, border_style="white", 
+                      title=f"SEARCH RESULTS FOR '{query.upper()}' ({offset+1}-{min(offset+page_size, total)} of {total})")
+        table.add_column("SYMBOL", style="bold cyan", min_width=10)
+        table.add_column("COMPANY NAME", style="white", min_width=30)
+        table.add_column("SECTOR", style="white")
+        table.add_column("ISIN", style="white")
 
-    return table, None
+        for c in chunk:
+            table.add_row(c.get("symbol"), c.get("company_name") or "", c.get("sector") or "", c.get("isin") or "")
+
+        console.clear()
+        layout = build_layout(table)
+        console.print(layout)
+
+        if total <= page_size:
+            Prompt.ask("[bold cyan]Press ENTER to return to menu[/]")
+            return table, None
+
+        choice = Prompt.ask("[bold cyan]COMMAND (N=Next, P=Previous, X=Menu)[/]", default="N").upper()
+        if choice == "N" and offset + page_size < total:
+            offset += page_size
+        elif choice == "P" and offset - page_size >= 0:
+            offset -= page_size
+        elif choice == "X":
+            return table, None
 
 def do_list_all() -> tuple:
     page_size = 50
@@ -205,7 +225,7 @@ def do_list_all() -> tuple:
             layout = build_layout(table)
             console.print(layout)
             
-            choice = Prompt.ask("[bold cyan]COMMAND (N=Next, P=Previous, X=Back to Menu)[/]", choices=["N", "P", "X"], default="N").upper()
+            choice = Prompt.ask("[bold cyan]COMMAND (N=Next, P=Previous, X=Back to Menu)[/]", default="N").upper()
             
             if choice == "N":
                 if offset + page_size < total:
@@ -213,13 +233,13 @@ def do_list_all() -> tuple:
             elif choice == "P":
                 if offset - page_size >= 0:
                     offset -= page_size
-            else:
+            elif choice == "X":
                 return table, None
 
 def do_essentials() -> tuple:
-    symbol = Prompt.ask("[bold cyan]Enter company symbol[/]").strip().upper()
-    if not symbol:
-        return Text("No symbol provided.", style="yellow"), None
+    symbol = Prompt.ask("[bold cyan]Enter company symbol (or 'X' to cancel)[/]").strip().upper()
+    if not symbol or symbol == "X":
+        return Text("Cancelled.", style="yellow"), None
 
     company = None
     essentials = []
@@ -270,9 +290,9 @@ def do_essentials() -> tuple:
     return layout, None
 
 def do_annual() -> tuple:
-    symbol = Prompt.ask("[bold cyan]Enter company symbol[/]").strip().upper()
-    if not symbol:
-        return Text("No symbol provided.", style="yellow"), None
+    symbol = Prompt.ask("[bold cyan]Enter company symbol (or 'X' to cancel)[/]").strip().upper()
+    if not symbol or symbol == "X":
+        return Text("Cancelled.", style="yellow"), None
 
     source_options = {
         "1": ("profit_loss", "PROFIT & LOSS"),
@@ -282,7 +302,9 @@ def do_annual() -> tuple:
         "5": ("investor_shareholding", "INVESTOR SHAREHOLDING"),
     }
 
-    choice = Prompt.ask("[bold cyan]Select statement (1=P&L, 2=BS, 3=CF, 4=Promoter, 5=Investor)[/]", choices=list(source_options.keys()), default="1")
+    choice = Prompt.ask("[bold cyan]Select statement (1=P&L, 2=BS, 3=CF, 4=Promoter, 5=Investor, X=Cancel)[/]", choices=["1", "2", "3", "4", "5", "X", "x"], default="1").upper()
+    if choice == "X":
+        return Text("Cancelled.", style="yellow"), None
     source_table, source_label = source_options[choice]
 
     rows = []
@@ -319,9 +341,9 @@ def do_annual() -> tuple:
     return table, None
 
 def do_quarterly() -> tuple:
-    symbol = Prompt.ask("[bold cyan]Enter company symbol[/]").strip().upper()
-    if not symbol:
-        return Text("No symbol provided.", style="yellow"), None
+    symbol = Prompt.ask("[bold cyan]Enter company symbol (or 'X' to cancel)[/]").strip().upper()
+    if not symbol or symbol == "X":
+        return Text("Cancelled.", style="yellow"), None
 
     rows = []
     sb_data = _fetch_supabase("quarterly_financials", eq={"symbol": symbol, "source_table": "quarterly_results"})
@@ -357,7 +379,9 @@ def do_quarterly() -> tuple:
     return table, None
 
 def do_compare() -> tuple:
-    symbols_raw = Prompt.ask("[bold cyan]Enter symbols to compare (comma-separated, max 5)[/]")
+    symbols_raw = Prompt.ask("[bold cyan]Enter symbols to compare (comma-separated, max 5, or 'X' to cancel)[/]")
+    if symbols_raw.upper() == "X":
+        return Text("Cancelled.", style="yellow"), None
     symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()][:5]
     if not symbols:
         return Text("No symbols provided.", style="yellow"), None
@@ -396,9 +420,9 @@ def do_compare() -> tuple:
     return table, None
 
 def do_export() -> tuple:
-    symbol = Prompt.ask("[bold cyan]Enter symbol to export[/]").strip().upper()
-    if not symbol:
-        return Text("No symbol provided.", style="yellow"), None
+    symbol = Prompt.ask("[bold cyan]Enter symbol to export (or 'X' to cancel)[/]").strip().upper()
+    if not symbol or symbol == "X":
+        return Text("Cancelled.", style="yellow"), None
         
     rows = []
     sb_data = _fetch_supabase("yearly_financials", eq={"symbol": symbol})

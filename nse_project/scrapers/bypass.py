@@ -182,11 +182,11 @@ def fetch_page(symbol: str) -> BeautifulSoup | None:
         status = getattr(getattr(exc, 'response', None), 'status_code', None)
         if status == 403:
             raise CloudflareBlockError("403 Forbidden on direct URL")
-        elif status in (400, 404):
-            logger.debug(f"[{symbol}] Direct URL failed with {status}, trying search fallback...")
+        elif status == 404:
+            logger.warning(f"[{symbol}] Direct URL failed with 404. Trying search fallback...")
         else:
-            logger.error(f"[{symbol}] Request failed: {exc}")
-            return None
+            logger.error(f"[{symbol}] HTTP {status} error: {exc}")
+            return None # Move on to next company
 
     search_query = encoded_symbol
     success_soup = None

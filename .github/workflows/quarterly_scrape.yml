@@ -24,6 +24,15 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Restore scrape state
+        id: cache-state
+        uses: actions/cache/restore@v4
+        with:
+          path: nse_project/data/scrape_state.json
+          key: scrape-state-${{ github.run_id }}
+          restore-keys: |
+            scrape-state-
+
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
@@ -46,6 +55,13 @@ jobs:
           name: nse-all-stocks-db-${{ github.run_number }}
           path: nse_project/data/nse_all_stocks.db
           retention-days: 90
+
+      - name: Save scrape state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: nse_project/data/scrape_state.json
+          key: scrape-state-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Commit updated SQLite DB to repo
         run: |

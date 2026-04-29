@@ -77,7 +77,7 @@ def _save_resume_state(mode: str, last_symbol: str):
 
 
 def _load_resume_state(mode: str) -> str | None:
-    """Load the last symbol for a given mode if it's recent (same day)."""
+    """Load the last symbol for a given mode if it's within the last 3 days."""
     if not _STATE_FILE.exists():
         return None
         
@@ -86,9 +86,9 @@ def _load_resume_state(mode: str) -> str | None:
             state = json.load(f)
             mode_state = state.get(mode)
             if mode_state:
-                # Check if it was from today
+                # Only resume if the state is within the last 3 days
                 ts = datetime.fromisoformat(mode_state["timestamp"])
-                if ts.date() == datetime.now().date():
+                if (datetime.now() - ts).days < 3:
                     return mode_state["last_symbol"]
     except Exception:
         pass
