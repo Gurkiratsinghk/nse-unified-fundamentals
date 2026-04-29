@@ -94,7 +94,7 @@ def sync_company_to_supabase(session: Session, symbol: str) -> bool:
         # 2. Sync unsynced CompanyEssentials
         unsynced_ess = (
             session.query(CompanyEssentials)
-            .filter_by(company_id=company.id, is_synced=False)
+            .filter_by(symbol=company.symbol, is_synced=False)
             .all()
         )
         if unsynced_ess:
@@ -115,7 +115,7 @@ def sync_company_to_supabase(session: Session, symbol: str) -> bool:
         # 3. Sync unsynced YearlyFinancials
         unsynced_yr = (
             session.query(YearlyFinancial)
-            .filter_by(company_id=company.id, is_synced=False)
+            .filter_by(symbol=company.symbol, is_synced=False)
             .all()
         )
         if unsynced_yr:
@@ -141,7 +141,7 @@ def sync_company_to_supabase(session: Session, symbol: str) -> bool:
         # 4. Sync unsynced QuarterlyFinancials
         unsynced_qt = (
             session.query(QuarterlyFinancial)
-            .filter_by(company_id=company.id, is_synced=False)
+            .filter_by(symbol=company.symbol, is_synced=False)
             .all()
         )
         if unsynced_qt:
@@ -220,25 +220,25 @@ def sync_all_pending(max_attempts: int = 3, retry_interval: int = 60) -> bool:
                         f"(Essentials: {pending_ess}, Yearly: {pending_yr}, Quarterly: {pending_qt})")
 
             # Get all companies that have unsynced data
-            company_ids = set()
+            symbols = set()
             if pending_ess > 0:
-                company_ids.update(
-                    cid for (cid,) in session.query(CompanyEssentials.company_id)
+                symbols.update(
+                    sym for (sym,) in session.query(CompanyEssentials.symbol)
                     .filter_by(is_synced=False).distinct().all()
                 )
             if pending_yr > 0:
-                company_ids.update(
-                    cid for (cid,) in session.query(YearlyFinancial.company_id)
+                symbols.update(
+                    sym for (sym,) in session.query(YearlyFinancial.symbol)
                     .filter_by(is_synced=False).distinct().all()
                 )
             if pending_qt > 0:
-                company_ids.update(
-                    cid for (cid,) in session.query(QuarterlyFinancial.company_id)
+                symbols.update(
+                    sym for (sym,) in session.query(QuarterlyFinancial.symbol)
                     .filter_by(is_synced=False).distinct().all()
                 )
 
             # Resolve symbols
-            companies = session.query(Company).filter(Company.id.in_(company_ids)).all()
+            companies = session.query(Company).filter(Company.symbol.in_(symbols)).all()
             logger.info(f"Syncing {len(companies)} companies with pending data...")
 
             success = 0

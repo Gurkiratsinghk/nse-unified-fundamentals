@@ -1,3 +1,6 @@
+# Virtual Environments
+nse_uni/
+
 # Packaging / Executables
 build/
 dist/
@@ -10,6 +13,7 @@ nse_project/data/*.bak*
 nse_project/data/*.corrupt
 nse_project/data/scrape_state.json
 NSE data/
+backup_nse100_bak1/
 
 # Logs & Reports
 nse_project/logs/

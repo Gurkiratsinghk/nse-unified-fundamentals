@@ -1,9 +1,26 @@
+"""
+Integration tests for the Cloudflare bypass mechanism.
+
+This test requires actual internet access and may fail if Cloudflare's
+challenge parameters change, or if run from a blocked datacenter IP.
+"""
 import sys
 import time
+import pytest
 
-def test_cookie_handoff():
-    print("Testing SeleniumBase -> curl_cffi Cookie Handoff...")
-    
+from bs4 import BeautifulSoup
+
+import shutil
+
+def test_cloudflare_bypass_handoff():
+    """
+    Test that SeleniumBase can successfully solve the Turnstile challenge,
+    extract the cf_clearance cookie, and hand it off to curl_cffi for
+    subsequent high-speed requests.
+    """
+    if sys.platform.startswith('linux') and not shutil.which('Xvfb'):
+        pytest.skip("Xvfb not installed. Skipping SeleniumBase bypass test.")
+
     url_solve = "https://ticker.finology.in/company/TCS"
     url_test = "https://ticker.finology.in/company/INFY"
     
@@ -21,13 +38,11 @@ def test_cookie_handoff():
             display = None
 
         with SB(uc=True, headless=False) as sb:
-            print("Launching SeleniumBase to solve challenge...")
             sb.uc_open_with_reconnect(url_solve, 4)
             time.sleep(5)
             
             title = sb.get_title()
             if "Just a moment" in title or "Cloudflare" in title:
-                print("Cloudflare challenge encountered, waiting for auto-solve...")
                 time.sleep(6)
                 try:
                     sb.uc_gui_click_captcha()
@@ -35,51 +50,39 @@ def test_cookie_handoff():
                     pass
                 time.sleep(4)
             
-            # Extract cookie and User-Agent
-            print("Extracting cf_clearance cookie...")
             for c in sb.get_cookies():
                 if c['name'] == 'cf_clearance':
                     cf_clearance = c['value']
                     break
             
             user_agent = sb.execute_script("return navigator.userAgent;")
-            print(f"Obtained cf_clearance: {cf_clearance}")
-            print(f"Obtained User-Agent: {user_agent}")
 
         if display:
             display.stop()
             
     except Exception as e:
-        print(f"seleniumbase phase error: {e}")
-        return
+        pytest.fail(f"SeleniumBase phase failed: {e}")
 
-    if not cf_clearance:
-        print("Failed to get cf_clearance. Exiting test.")
-        return
+    assert cf_clearance is not None, "Failed to get cf_clearance cookie from SeleniumBase"
 
     # Now test with curl_cffi using the obtained cookie
     try:
-        print("\n--- Testing curl_cffi with extracted cookie ---")
         from curl_cffi import requests as curl_requests
         s = curl_requests.Session(impersonate="chrome")
         
-        # Override headers with the exact User-Agent from Selenium
         headers = {
             "Referer": "https://ticker.finology.in/",
             "User-Agent": user_agent
         }
         cookies = {"cf_clearance": cf_clearance}
         
-        print(f"Fetching {url_test} via curl_cffi...")
         r = s.get(url_test, headers=headers, cookies=cookies, timeout=15)
-        print(f"curl_cffi Status: {r.status_code}")
-        if r.status_code == 200:
-            print("curl_cffi bypass successful using SeleniumBase cookie!")
-        else:
-            print("curl_cffi bypass failed even with cookie.")
+        
+        assert r.status_code == 200, f"curl_cffi bypass failed. Status code: {r.status_code}"
+        
+        # Verify it's the actual page and not a WAF block returning 200
+        soup = BeautifulSoup(r.text, "lxml")
+        assert soup.find("div", id="companyessentials") is not None, "companyessentials div not found, likely a silent WAF block"
             
     except Exception as e:
-        print(f"curl_cffi phase error: {e}")
-
-if __name__ == "__main__":
-    test_cookie_handoff()
+        pytest.fail(f"curl_cffi phase failed: {e}")

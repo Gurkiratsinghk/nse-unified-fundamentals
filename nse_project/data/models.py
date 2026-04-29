@@ -58,7 +58,7 @@ class NSE100Constituent(Base):
     __tablename__ = "nse100_constituents"
 
     id           = Column(Integer, primary_key=True, autoincrement=True)
-    company_id   = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    symbol       = Column(String, ForeignKey("companies.symbol"), nullable=False)
     added_date   = Column(Date, nullable=False)
     removed_date = Column(Date, nullable=True)   # NULL = currently active
     created_at   = Column(DateTime, default=datetime.utcnow)
@@ -67,7 +67,7 @@ class NSE100Constituent(Base):
 
     def __repr__(self):
         return (
-            f"<NSE100Constituent company_id={self.company_id} "
+            f"<NSE100Constituent symbol={self.symbol} "
             f"added={self.added_date} removed={self.removed_date}>"
         )
 
@@ -81,7 +81,7 @@ class CompanyEssentials(Base):
     __tablename__ = "company_essentials"
 
     id          = Column(Integer, primary_key=True, autoincrement=True)
-    company_id  = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    symbol      = Column(String, ForeignKey("companies.symbol"), nullable=False)
     scraped_at  = Column(DateTime, default=datetime.utcnow)
     metric_name = Column(String, nullable=False)   # e.g. "market_cap", "pe_ratio"
     value_num   = Column(Float,  nullable=True)    # numeric value if parseable
@@ -90,14 +90,14 @@ class CompanyEssentials(Base):
     created_at  = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        UniqueConstraint("company_id", "metric_name", name="uq_essentials_company_metric"),
+        UniqueConstraint("symbol", "metric_name", name="uq_essentials_company_metric"),
     )
 
     company = relationship("Company", back_populates="essentials")
 
     def __repr__(self):
         return (
-            f"<CompanyEssentials company_id={self.company_id} "
+            f"<CompanyEssentials symbol={self.symbol} "
             f"metric={self.metric_name} value={self.value_num or self.value_text}>"
         )
 
@@ -114,7 +114,7 @@ class YearlyFinancial(Base):
     __tablename__ = "yearly_financials"
 
     id           = Column(Integer, primary_key=True, autoincrement=True)
-    company_id   = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    symbol       = Column(String, ForeignKey("companies.symbol"), nullable=False)
     fiscal_year  = Column(Integer, nullable=False)   # e.g. 2024
     source_table = Column(String,  nullable=False)   # profit_loss / balance_sheet / cash_flow
     metric_name  = Column(String,  nullable=False)   # snake_case label
@@ -126,7 +126,7 @@ class YearlyFinancial(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "company_id", "fiscal_year", "source_table", "metric_name",
+            "symbol", "fiscal_year", "source_table", "metric_name",
             name="uq_yearly_company_year_source_metric",
         ),
     )
@@ -135,7 +135,7 @@ class YearlyFinancial(Base):
 
     def __repr__(self):
         return (
-            f"<YearlyFinancial company_id={self.company_id} "
+            f"<YearlyFinancial symbol={self.symbol} "
             f"fy={self.fiscal_year} src={self.source_table} "
             f"metric={self.metric_name} val={self.value_num or self.value_text}>"
         )
@@ -145,7 +145,7 @@ class QuarterlyFinancial(Base):
     __tablename__ = "quarterly_financials"
 
     id           = Column(Integer, primary_key=True, autoincrement=True)
-    company_id   = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    symbol       = Column(String, ForeignKey("companies.symbol"), nullable=False)
     quarter_date = Column(String, nullable=False)    # e.g. "Dec 2025" or "Q3 2025"
     source_table = Column(String,  nullable=False)   # "quarterly_results"
     metric_name  = Column(String,  nullable=False)   # snake_case label
@@ -157,7 +157,7 @@ class QuarterlyFinancial(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "company_id", "quarter_date", "source_table", "metric_name",
+            "symbol", "quarter_date", "source_table", "metric_name",
             name="uq_quarterly_company_date_source_metric",
         ),
     )
@@ -166,7 +166,7 @@ class QuarterlyFinancial(Base):
 
     def __repr__(self):
         return (
-            f"<QuarterlyFinancial company_id={self.company_id} "
+            f"<QuarterlyFinancial symbol={self.symbol} "
             f"q={self.quarter_date} src={self.source_table} "
             f"metric={self.metric_name} val={self.value_num or self.value_text}>"
         )
@@ -180,7 +180,7 @@ class Ranking(Base):
     __tablename__ = "rankings"
 
     id          = Column(Integer, primary_key=True, autoincrement=True)
-    company_id  = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    symbol      = Column(String, ForeignKey("companies.symbol"), nullable=False)
     ranked_on   = Column(Date, nullable=False)
     config_used = Column(String, nullable=True)
     score       = Column(Float,  nullable=True)
@@ -194,7 +194,7 @@ class Portfolio(Base):
     __tablename__ = "portfolio"
 
     id             = Column(Integer, primary_key=True, autoincrement=True)
-    company_id     = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    symbol         = Column(String, ForeignKey("companies.symbol"), nullable=False)
     created_on     = Column(Date,    nullable=False)
     allocation_pct = Column(Float,   nullable=True)
     rationale      = Column(Text,    nullable=True)

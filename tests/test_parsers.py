@@ -6,7 +6,7 @@ from pathlib import Path
 # Add nse_project to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "nse_project"))
 
-from scrapers.financials import _to_snake, _clean_numeric_string, _parse_value
+from scrapers.parsers import _to_snake, _clean_numeric_string, _parse_value
 
 def test_to_snake():
     assert _to_snake("Net Profit Margin (%)") == "net_profit_margin_pct"
