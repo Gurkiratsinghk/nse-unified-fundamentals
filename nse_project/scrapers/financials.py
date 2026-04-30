@@ -236,6 +236,7 @@ def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int
         return 0, len(symbols)
 
     idx = 0
+    symbol_retries = 0
     while idx < len(symbols):
         symbol = symbols[idx]
         
@@ -263,17 +264,28 @@ def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int
             if callback:
                 callback(symbol, ok)
             
-            # Successfully processed, move to next symbol
+            # Successfully processed or moved on, reset symbol retry counter
             idx += 1
+            symbol_retries = 0
 
         except CloudflareBlockError:
+            if symbol_retries >= 1:
+                logger.error(f"[{symbol}] Still receiving 403 after bypass reset. Skipping to prevent infinite loop.")
+                failure += 1
+                if callback:
+                    callback(symbol, False)
+                idx += 1
+                symbol_retries = 0
+                continue
+
             logger.warning(f"[{symbol}] 403 Forbidden encountered! Pausing to reset bypass...")
+            symbol_retries += 1
             if not init_cloudflare_bypass():
                 logger.critical("Failed to reset bypass after 403 error. Aborting scrape.")
                 failure += len(symbols) - idx
                 break
-            logger.success("Bypass reset successfully. Retrying current symbol...")
-            # Do NOT increment idx, we want to retry the same symbol
+            logger.success("Bypass reset successfully. Retrying current symbol (Attempt 2)...")
+            # Do NOT increment idx, we want to retry the same symbol once
             
         except Exception as exc:
             logger.error(f"[{symbol}] Unhandled exception: {exc}")
@@ -281,6 +293,7 @@ def run_scraper_for_symbols(symbols: list[str], callback=None) -> tuple[int, int
             if callback:
                 callback(symbol, False)
             idx += 1
+            symbol_retries = 0
 
         if idx < len(symbols):
             jitter_sleep()
