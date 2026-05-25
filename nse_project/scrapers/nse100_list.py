@@ -192,11 +192,11 @@ def _get_or_create_company(session: Session, entry: dict) -> Company:
     return company
 
 
-def _get_active_constituent(session: Session, company_id: int) -> NSE100Constituent | None:
+def _get_active_constituent(session: Session, symbol: str) -> NSE100Constituent | None:
     """Return the currently active constituent row for a company, or None."""
     return (
         session.query(NSE100Constituent)
-        .filter_by(company_id=company_id, removed_date=None)
+        .filter_by(symbol=symbol, removed_date=None)
         .first()
     )
 
@@ -240,11 +240,11 @@ def fetch_and_update_nse100() -> None:
         # ---- Step 1 & 2: sync fresh symbols into DB ----
         for entry in fresh_list:
             company    = _get_or_create_company(session, entry)
-            active_row = _get_active_constituent(session, company.id)
+            active_row = _get_active_constituent(session, company.symbol)
 
             if not active_row:
                 session.add(NSE100Constituent(
-                    company_id = company.id,
+                    symbol     = company.symbol,
                     added_date = today,
                 ))
                 logger.info(
@@ -261,12 +261,11 @@ def fetch_and_update_nse100() -> None:
 
         removals = 0
         for row in active_rows:
-            co = session.get(Company, row.company_id)
-            if co and co.symbol not in fresh_symbols:
+            if row.symbol not in fresh_symbols:
                 row.removed_date = today
                 removals += 1
                 logger.info(
-                    f"Removed from NSE100: {co.symbol} (removed_date={today}) "
+                    f"Removed from NSE100: {row.symbol} (removed_date={today}) "
                     f"— fundamentals scraping will continue."
                 )
 
@@ -289,7 +288,7 @@ def get_all_scrape_symbols() -> list[str]:
     with get_db() as session:
         rows = (
             session.query(Company.symbol)
-            .join(NSE100Constituent, NSE100Constituent.company_id == Company.id)
+            .join(NSE100Constituent, NSE100Constituent.symbol == Company.symbol)
             .distinct()
             .order_by(Company.symbol)
             .all()
@@ -305,7 +304,7 @@ def get_active_symbols() -> list[str]:
     with get_db() as session:
         rows = (
             session.query(Company.symbol)
-            .join(NSE100Constituent, NSE100Constituent.company_id == Company.id)
+            .join(NSE100Constituent, NSE100Constituent.symbol == Company.symbol)
             .filter(NSE100Constituent.removed_date.is_(None))
             .order_by(Company.symbol)
             .all()

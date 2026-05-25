@@ -255,7 +255,7 @@ def do_essentials() -> tuple:
             c = session.query(Company).filter_by(symbol=symbol).first()
             if c:
                 company = {"symbol": c.symbol, "company_name": c.company_name, "sector": c.sector, "industry": c.industry, "isin": c.isin}
-                db_ess = session.query(CompanyEssentials).filter_by(company_id=c.id).all()
+                db_ess = session.query(CompanyEssentials).filter_by(symbol=c.symbol).all()
                 essentials = [{"metric_name": e.metric_name, "value_num": e.value_num, "value_text": e.value_text} for e in db_ess]
 
     if not company:
@@ -315,7 +315,7 @@ def do_annual() -> tuple:
         with get_db() as session:
             company = session.query(Company).filter_by(symbol=symbol).first()
             if company:
-                db_rows = session.query(YearlyFinancial).filter_by(company_id=company.id, source_table=source_table).order_by(YearlyFinancial.fiscal_year, YearlyFinancial.metric_name).all()
+                db_rows = session.query(YearlyFinancial).filter_by(symbol=company.symbol, source_table=source_table).order_by(YearlyFinancial.fiscal_year, YearlyFinancial.metric_name).all()
                 rows = [{"fiscal_year": r.fiscal_year, "metric_name": r.metric_name, "value_num": r.value_num, "value_text": r.value_text} for r in db_rows]
 
     if not rows:
@@ -353,7 +353,7 @@ def do_quarterly() -> tuple:
         with get_db() as session:
             company = session.query(Company).filter_by(symbol=symbol).first()
             if company:
-                db_rows = session.query(QuarterlyFinancial).filter_by(company_id=company.id, source_table="quarterly_results").order_by(QuarterlyFinancial.quarter_date, QuarterlyFinancial.metric_name).all()
+                db_rows = session.query(QuarterlyFinancial).filter_by(symbol=company.symbol, source_table="quarterly_results").order_by(QuarterlyFinancial.quarter_date, QuarterlyFinancial.metric_name).all()
                 rows = [{"quarter_date": r.quarter_date, "metric_name": r.metric_name, "value_num": r.value_num, "value_text": r.value_text} for r in db_rows]
 
     if not rows:
@@ -404,7 +404,7 @@ def do_compare() -> tuple:
                 company = session.query(Company).filter_by(symbol=symbol).first()
                 if not company:
                     continue
-                essentials = session.query(CompanyEssentials).filter_by(company_id=company.id).all()
+                essentials = session.query(CompanyEssentials).filter_by(symbol=company.symbol).all()
                 ess_dict = {e.metric_name: _format_value(e.value_num, e.value_text) for e in essentials}
                 
         if ess_dict:
@@ -433,7 +433,7 @@ def do_export() -> tuple:
             company = session.query(Company).filter_by(symbol=symbol).first()
             if not company:
                 return Text(f"Company '{symbol}' not found.", style="red"), None
-            db_rows = session.query(YearlyFinancial).filter_by(company_id=company.id).all()
+            db_rows = session.query(YearlyFinancial).filter_by(symbol=company.symbol).all()
             rows = [{"fiscal_year": r.fiscal_year, "source_table": r.source_table, "metric_name": r.metric_name, "value_num": r.value_num, "value_text": r.value_text} for r in db_rows]
         
     if not rows:
