@@ -19,13 +19,32 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
+          # Guard: fail loudly if secrets are not configured
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "❌ SUPABASE_URL secret is not set in GitHub repository secrets!"
+            exit 1
+          fi
+          if [ -z "$SUPABASE_KEY" ]; then
+            echo "❌ SUPABASE_KEY secret is not set in GitHub repository secrets!"
+            exit 1
+          fi
+
+          # Normalize: strip trailing slash from URL to avoid double-slash in path
+          BASE_URL="${SUPABASE_URL%/}"
+
+          echo "Pinging: ${BASE_URL}/rest/v1/companies?select=symbol&limit=1"
+
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "${SUPABASE_URL}/rest/v1/companies?select=symbol&limit=1" \
+            "${BASE_URL}/rest/v1/companies?select=symbol&limit=1" \
             -H "apikey: ${SUPABASE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_KEY}")
+
+          echo "HTTP Status: $STATUS"
+
           if [ "$STATUS" -eq 200 ]; then
             echo "✅ Supabase is alive (HTTP $STATUS)"
           else
-            echo "❌ Supabase returned HTTP $STATUS — project may be paused!"
+            echo "❌ Supabase returned HTTP $STATUS — project may be paused or secrets may be wrong!"
             exit 1
           fi
+
